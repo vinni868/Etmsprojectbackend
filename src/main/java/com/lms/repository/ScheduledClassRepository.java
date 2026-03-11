@@ -21,4 +21,5 @@ public interface ScheduledClassRepository extends JpaRepository<ScheduledClass, 
             Long trainerId,
             String status
     );
+    List<ScheduledClass> findByCourseIdAndBatchId(Long courseId, Long batchId);
 }

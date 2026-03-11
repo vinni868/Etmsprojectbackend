@@ -253,40 +253,8 @@ public class AdminController {
         }).toList();
     }
     
- 
-    @PostMapping("/schedule-classes")
-    public ResponseEntity<?> scheduleClass(@RequestBody Map<String, String> payload) {
-        try {
 
-            ScheduledClass schedule = new ScheduledClass();
-
-            schedule.setCourseId(Long.parseLong(payload.get("courseId")));
-            schedule.setBatchId(Long.parseLong(payload.get("batchId")));
-            schedule.setTrainerId(Long.parseLong(payload.get("trainerId")));
-
-            schedule.setClassDate(LocalDate.parse(payload.get("startDate")));
-
-            /* NEW */
-            schedule.setEndDate(LocalDate.parse(payload.get("endDate")));
-
-            schedule.setStartTime(LocalTime.parse(payload.get("startTime")));
-            schedule.setEndTime(LocalTime.parse(payload.get("endTime")));
-
-            schedule.setStatus("ACTIVE");
-
-            scheduledClassRepository.save(schedule);
-
-            return ResponseEntity.ok("Class scheduled successfully");
-
-        } catch (Exception e) {
-
-            return ResponseEntity.badRequest()
-                    .body("Error: Ensure trainer is correctly assigned to course.");
-
-        }
-    }
- 
-
+   
     	//================= SCHEDULED CLASSES (UPDATED) =================
     @GetMapping("/schedule-classes")
     public List<Map<String, Object>> getAllScheduledClasses() {
@@ -372,7 +340,73 @@ public class AdminController {
 
 
 
+    @PutMapping("/schedule-classes/{id}")
+    public ResponseEntity<?> updateSchedule(@PathVariable Long id,
+                                            @RequestBody Map<String, Object> payload) {
 
+        try {
+
+            ScheduledClass schedule = scheduledClassRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Schedule not found"));
+
+            Long courseId = Long.parseLong(payload.get("courseId").toString());
+            Long batchId = Long.parseLong(payload.get("batchId").toString());
+
+            LocalDate startDate = LocalDate.parse(payload.get("startDate").toString());
+            LocalDate endDate = LocalDate.parse(payload.get("endDate").toString());
+
+            LocalTime startTime = LocalTime.parse(payload.get("startTime").toString());
+            LocalTime endTime = LocalTime.parse(payload.get("endTime").toString());
+
+            // 🔴 CHECK FOR CONFLICT (IGNORE CURRENT ID)
+            List<ScheduledClass> existingSchedules =
+                    scheduledClassRepository.findByCourseIdAndBatchId(courseId, batchId);
+
+            for (ScheduledClass existing : existingSchedules) {
+
+                if (existing.getId().equals(id)) continue;
+
+                boolean dateOverlap =
+                        !(endDate.isBefore(existing.getClassDate())
+                        || startDate.isAfter(existing.getEndDate()));
+
+                boolean timeOverlap =
+                        !(endTime.isBefore(existing.getStartTime())
+                        || startTime.isAfter(existing.getEndTime()));
+
+                if (dateOverlap && timeOverlap) {
+
+                    return ResponseEntity.badRequest()
+                            .body("Schedule conflict: Class already exists for this date and time.");
+                }
+            }
+
+            schedule.setCourseId(courseId);
+            schedule.setBatchId(batchId);
+
+            if (payload.get("trainerId") != null) {
+                schedule.setTrainerId(Long.parseLong(payload.get("trainerId").toString()));
+            }
+
+            schedule.setClassDate(startDate);
+            schedule.setEndDate(endDate);
+
+            schedule.setStartTime(startTime);
+            schedule.setEndTime(endTime);
+
+            String newStatus = payload.get("status").toString().toUpperCase();
+            schedule.setStatus(newStatus);
+
+            scheduledClassRepository.save(schedule);
+
+            return ResponseEntity.ok("Schedule updated successfully");
+
+        } catch (Exception e) {
+
+            return ResponseEntity.badRequest().body(e.getMessage());
+
+        }
+    }
  // 3. TOGGLE STATUS (PATCH)
  @PatchMapping("/batches/{id}/status")
  public ResponseEntity<?> updateBatchStatus(@PathVariable Long id, @RequestBody Map<String, String> payload) {
@@ -437,62 +471,83 @@ public ResponseEntity<?> softDeleteBatch(@PathVariable Long id) {
       return ResponseEntity.badRequest().body("Error: " + e.getMessage());
   }
 }
-
-
-
-@PutMapping("/schedule-classes/{id}")
-public ResponseEntity<?> updateSchedule(@PathVariable Long id,
-                                        @RequestBody Map<String, Object> payload) {
+@PostMapping("/schedule-classes")
+public ResponseEntity<?> scheduleClass(@RequestBody Map<String, String> payload) {
 
     try {
 
-        ScheduledClass schedule = scheduledClassRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Schedule not found"));
+        Long courseId = Long.parseLong(payload.get("courseId"));
+        Long batchId = Long.parseLong(payload.get("batchId"));
+        Long trainerId = Long.parseLong(payload.get("trainerId"));
 
-        Long batchId = Long.parseLong(payload.get("batchId").toString());
-        String newStatus = payload.get("status").toString().toUpperCase();
+        LocalDate startDate = LocalDate.parse(payload.get("startDate"));
+        LocalDate endDate = LocalDate.parse(payload.get("endDate"));
 
-        schedule.setCourseId(Long.parseLong(payload.get("courseId").toString()));
-        schedule.setBatchId(batchId);
+        LocalTime startTime = LocalTime.parse(payload.get("startTime"));
+        LocalTime endTime = LocalTime.parse(payload.get("endTime"));
 
-        if (payload.get("trainerId") != null) {
-            schedule.setTrainerId(Long.parseLong(payload.get("trainerId").toString()));
+        // ================= DUPLICATE VALIDATION =================
+
+        List<ScheduledClass> existingSchedules =
+                scheduledClassRepository.findByCourseIdAndBatchId(courseId, batchId);
+
+        for (ScheduledClass existing : existingSchedules) {
+
+            LocalDate existingStart = existing.getClassDate();
+            LocalDate existingEnd = existing.getEndDate();
+
+            LocalTime existingStartTime = existing.getStartTime();
+            LocalTime existingEndTime = existing.getEndTime();
+
+            // DATE OVERLAP CHECK
+            boolean dateOverlap =
+                    (startDate.isEqual(existingStart) || startDate.isAfter(existingStart)) &&
+                    (startDate.isBefore(existingEnd) || startDate.isEqual(existingEnd))
+                    ||
+                    (existingStart.isEqual(startDate) || existingStart.isAfter(startDate)) &&
+                    (existingStart.isBefore(endDate) || existingStart.isEqual(endDate));
+
+            // TIME OVERLAP CHECK
+            boolean timeOverlap =
+                    startTime.isBefore(existingEndTime) &&
+                    endTime.isAfter(existingStartTime);
+
+            if (dateOverlap && timeOverlap) {
+
+                return ResponseEntity.badRequest()
+                        .body("Duplicate schedule not allowed: This batch already has a class scheduled for this date and time.");
+
+            }
         }
 
-        schedule.setClassDate(LocalDate.parse(payload.get("startDate").toString()));
+        // ================= SAVE SCHEDULE =================
 
-        /* NEW */
-        schedule.setEndDate(LocalDate.parse(payload.get("endDate").toString()));
+        ScheduledClass schedule = new ScheduledClass();
 
-        schedule.setStartTime(LocalTime.parse(payload.get("startTime").toString()));
-        schedule.setEndTime(LocalTime.parse(payload.get("endTime").toString()));
+        schedule.setCourseId(courseId);
+        schedule.setBatchId(batchId);
+        schedule.setTrainerId(trainerId);
 
-        schedule.setStatus(newStatus);
+        schedule.setClassDate(startDate);
+        schedule.setEndDate(endDate);
+
+        schedule.setStartTime(startTime);
+        schedule.setEndTime(endTime);
+
+        schedule.setStatus("ACTIVE");
 
         scheduledClassRepository.save(schedule);
 
-        Batches batch = batchRepository.findById(batchId)
-                .orElseThrow(() -> new RuntimeException("Batch not found"));
-
-        if ("COMPLETED".equals(newStatus)) {
-            batch.setStatus("COMPLETED");
-        } else if ("INACTIVE".equals(newStatus)) {
-            batch.setStatus("INACTIVE");
-        } else {
-            batch.setStatus("ONGOING");
-        }
-
-        batchRepository.save(batch);
-
-        return ResponseEntity.ok("Schedule & Batch updated successfully");
+        return ResponseEntity.ok("Class scheduled successfully");
 
     } catch (Exception e) {
 
-        return ResponseEntity.badRequest()
-                .body("Database Error: " + e.getMessage());
+        return ResponseEntity.badRequest().body(e.getMessage());
 
     }
 }
+
+
 
 //================= SOFT DELETE SCHEDULED CLASS (Mark as INACTIVE) =================
 @DeleteMapping("/schedule-classes/{id}")

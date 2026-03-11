@@ -24,16 +24,7 @@ public class StudentController {
     private StudentBatchesRepository studentBatchRepository;
 
     @Autowired
-    private BatchRepository batchRepository;
-
-    @Autowired
-    private CourseRepository courseRepository;
-
-    @Autowired
-    private ScheduledClassRepository scheduledClassRepository;
-
-    @Autowired
-    private UserRepository userRepository;
+    private StudentCourseRepository studentCourseRepository;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -51,35 +42,8 @@ public class StudentController {
         throw new RuntimeException("User not logged in. Please login again.");
     }
 
-    // ----------------- MY COURSES -----------------
-    @GetMapping("/my-courses")
-    public ResponseEntity<?> getMyCourses(HttpSession session) {
-        try {
-            Long studentId = getLoggedInStudentId(session);
-            List<Map<String, Object>> courseList = studentBatchRepository.findByStudent_Id(studentId)
-                    .stream().map(sb -> {
-                        Map<String, Object> map = new HashMap<>();
-                        Batches batch = sb.getBatch();
-                        CourseMaster course = batch.getCourse();
-
-                        map.put("id", course.getId());
-                        map.put("courseName", course.getCourseName());
-                        map.put("description", course.getDescription());
-                        map.put("duration", course.getDuration());
-                        map.put("syllabusFileName", course.getSyllabusFileName());
-
-                        map.put("batchId", batch.getId());
-                        map.put("batchName", batch.getBatchName());
-                        map.put("batchStatus", sb.getStatus());
-
-                        return map;
-                    }).collect(Collectors.toList());
-
-            return ResponseEntity.ok(courseList);
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(401).body(Map.of("error", e.getMessage()));
-        }
-    }
+ 
+    
 
     // ----------------- STUDENT ATTENDANCE -----------------
     @GetMapping("/attendance/details/{studentId}")
@@ -157,6 +121,235 @@ public class StudentController {
 
         } catch (Exception e) {
             return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
+        }
+    }
+ // ----------------- STUDENT DASHBOARD -----------------
+//    @GetMapping("/dashboard")
+//    public ResponseEntity<?> getStudentDashboard(HttpSession session) {
+//
+//        try {
+//
+//            Long studentId = getLoggedInStudentId(session);
+//
+//            Map<String, Object> dashboard = new HashMap<>();
+//
+//            // ================= TOTAL COURSES =================
+//            int totalCourses = (int) studentCourseRepository.findAll()
+//                    .stream()
+//                    .filter(sc -> sc.getStudent().getId().equals(studentId))
+//                    .count();
+//
+//            dashboard.put("totalCourses", totalCourses);
+//
+//            // ================= ATTENDANCE =================
+//            String totalSql =
+//                    "SELECT COUNT(*) FROM trainer_marked_attendance WHERE student_id = ?";
+//
+//            Integer totalClasses =
+//                    jdbcTemplate.queryForObject(totalSql, Integer.class, studentId);
+//
+//            String presentSql =
+//                    "SELECT COUNT(*) FROM trainer_marked_attendance WHERE student_id = ? AND status='Present'";
+//
+//            Integer presentClasses =
+//                    jdbcTemplate.queryForObject(presentSql, Integer.class, studentId);
+//
+//            int attendancePercent = 0;
+//
+//            if (totalClasses != null && totalClasses > 0) {
+//                attendancePercent = (presentClasses * 100) / totalClasses;
+//            }
+//
+//            dashboard.put("attendance", attendancePercent);
+//
+//            // ================= PENDING ASSIGNMENTS =================
+//            // If assignment table exists update here
+//            dashboard.put("pendingAssignments", 0);
+//
+//            // ================= PROGRESS =================
+//            int progress = attendancePercent; // simple logic
+//            dashboard.put("progress", progress);
+//
+//            return ResponseEntity.ok(dashboard);
+//
+//        } catch (Exception e) {
+//
+//            return ResponseEntity
+//                    .status(500)
+//                    .body(Map.of("error", e.getMessage()));
+//        }
+//    }
+ // ----------------- MY COURSES -----------------
+    @GetMapping("/my-courses")
+    public ResponseEntity<?> getMyCourses(HttpSession session) {
+        try {
+
+            Long studentId = getLoggedInStudentId(session);
+
+            List<Map<String, Object>> courseList =
+                    studentBatchRepository.findByStudent_Id(studentId)
+                    .stream()
+                    .map(sb -> {
+
+                        Map<String, Object> map = new HashMap<>();
+
+                        Batches batch = sb.getBatch();
+                        CourseMaster course = batch.getCourse();
+
+                        map.put("id", course.getId());
+                        map.put("courseName", course.getCourseName());
+                        map.put("description", course.getDescription());
+                        map.put("duration", course.getDuration());
+                        map.put("syllabusFileName", course.getSyllabusFileName());
+
+                        map.put("batchId", batch.getId());
+                        map.put("batchName", batch.getBatchName());
+                        map.put("batchStatus", sb.getStatus());
+
+                        // ================= NEXT CLASS =================
+
+                        String classSql =
+                            "SELECT class_date, start_time, end_time " +
+                            "FROM scheduled_classes " +
+                            "WHERE batch_id = ? AND class_date >= CURDATE() " +
+                            "ORDER BY class_date ASC LIMIT 1";
+
+                        List<Map<String,Object>> nextClass =
+                            jdbcTemplate.queryForList(classSql, batch.getId());
+
+                        if (!nextClass.isEmpty()) {
+                            Map<String,Object> c = nextClass.get(0);
+
+                            map.put("nextClassDate", c.get("class_date"));
+                            map.put("startTime", c.get("start_time"));
+                            map.put("endTime", c.get("end_time"));
+
+                        } else {
+
+                            map.put("nextClassDate", null);
+                            map.put("startTime", null);
+                            map.put("endTime", null);
+                        }
+
+                        return map;
+
+                    }).collect(Collectors.toList());
+
+            return ResponseEntity.ok(courseList);
+
+        } catch (RuntimeException e) {
+
+            return ResponseEntity
+                    .status(401)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    
+    
+    
+ // ----------------- STUDENT DASHBOARD -----------------
+    @GetMapping("/dashboard")
+    public ResponseEntity<?> getStudentDashboard(HttpSession session) {
+
+        try {
+
+            Long studentId = getLoggedInStudentId(session);
+            Map<String, Object> dashboard = new HashMap<>();
+
+            // ================= TOTAL COURSES =================
+            int totalCourses = (int) studentCourseRepository.findAll()
+                    .stream()
+                    .filter(sc -> sc.getStudent().getId().equals(studentId))
+                    .count();
+            dashboard.put("totalCourses", totalCourses);
+
+            // ================= ATTENDANCE =================
+            // Count of all classes where student attended or took leave
+            String presentLeaveSql =
+                    "SELECT COUNT(*) FROM trainer_marked_attendance " +
+                    "WHERE student_id = ? AND status IN ('Present', 'Leave')";
+            Integer presentLeaveCount =
+                    jdbcTemplate.queryForObject(presentLeaveSql, Integer.class, studentId);
+
+            // Total classes (including absent)
+            String totalSql =
+                    "SELECT COUNT(*) FROM trainer_marked_attendance WHERE student_id = ?";
+            Integer totalClasses =
+                    jdbcTemplate.queryForObject(totalSql, Integer.class, studentId);
+
+            // Calculate attendance % (Present + Leave only)
+            int attendancePercent = 0;
+            if (totalClasses != null && totalClasses > 0) {
+                attendancePercent = (presentLeaveCount * 100) / totalClasses;
+            }
+
+            dashboard.put("attendance", attendancePercent);
+
+            // ================= PENDING ASSIGNMENTS =================
+            // If assignment table exists update here
+            dashboard.put("pendingAssignments", 0);
+
+            // ================= PROGRESS =================
+            int progress = attendancePercent; // simple logic
+            dashboard.put("progress", progress);
+
+            return ResponseEntity.ok(dashboard);
+
+        } catch (Exception e) {
+            return ResponseEntity
+                    .status(500)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+    
+    
+    
+    
+    
+    
+    
+    
+    
+ // ----------------- DOWNLOAD SYLLABUS -----------------
+    @GetMapping("/courses/download/{courseId}")
+    public ResponseEntity<?> downloadSyllabus(@PathVariable Long courseId) {
+
+        try {
+
+            String sql =
+                "SELECT syllabus_file_name, syllabus_file_path " +
+                "FROM course_master WHERE id = ?";
+
+            Map<String,Object> fileData =
+                jdbcTemplate.queryForMap(sql, courseId);
+
+            String fileName = (String) fileData.get("syllabus_file_name");
+            String filePath = (String) fileData.get("syllabus_file_path");
+
+            java.io.File file = new java.io.File(filePath);
+
+            if (!file.exists()) {
+                return ResponseEntity
+                        .status(404)
+                        .body("File not found");
+            }
+
+            org.springframework.core.io.Resource resource =
+                    new org.springframework.core.io.FileSystemResource(file);
+
+            return ResponseEntity.ok()
+                    .header(
+                            "Content-Disposition",
+                            "attachment; filename=\"" + fileName + "\""
+                    )
+                    .body(resource);
+
+        } catch (Exception e) {
+
+            return ResponseEntity
+                    .status(500)
+                    .body("Failed to download syllabus");
         }
     }
 }
